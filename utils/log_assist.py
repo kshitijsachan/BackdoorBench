@@ -1,4 +1,19 @@
+import os
 import subprocess
+from functools import cache
+
+
+@cache
+def get_save_path(rrfs: bool):
+    if rrfs:
+        return os.path.expanduser("~/rrfs/ksachan/backdoor_bench/record")
+    return "../record"
+
+@cache
+def get_dataset_path(rrfs: bool):
+    if rrfs:
+        return os.path.expanduser("~/rrfs/ksachan/backdoor_bench/data")
+    return "../data"
 
 def get_git_info():
 

@@ -11,31 +11,47 @@ basic structure:
 7. save the attack result for defense
 '''
 
-import sys, yaml, os
+import os
+import sys
+
+import yaml
 
 os.chdir(sys.path[0])
 sys.path.append('../')
 os.getcwd()
 
 import argparse
-from pprint import  pformat
+import logging
+import time
+from copy import deepcopy
+from pprint import pformat
+
 import numpy as np
 import torch
-import time
-import logging
 
-from utils.aggregate_block.save_path_generate import generate_save_folder
-from utils.aggregate_block.dataset_and_transform_generate import get_num_classes, get_input_shape
+from utils.aggregate_block.bd_attack_generate import (
+    bd_attack_img_trans_generate,
+    bd_attack_label_trans_generate,
+)
+from utils.aggregate_block.dataset_and_transform_generate import (
+    dataset_and_transform_generate,
+    get_input_shape,
+    get_num_classes,
+)
 from utils.aggregate_block.fix_random import fix_random
-from utils.aggregate_block.dataset_and_transform_generate import dataset_and_transform_generate
-from utils.bd_dataset import prepro_cls_DatasetBD
+from utils.aggregate_block.model_trainer_generate import (
+    generate_cls_model,
+    generate_cls_trainer,
+)
+from utils.aggregate_block.save_path_generate import generate_save_folder
+from utils.aggregate_block.train_settings_generate import (
+    argparser_criterion,
+    argparser_opt_scheduler,
+)
 from utils.backdoor_generate_pindex import generate_pidx_from_label_transform
-from utils.aggregate_block.bd_attack_generate import bd_attack_img_trans_generate, bd_attack_label_trans_generate
-from copy import deepcopy
-from utils.aggregate_block.model_trainer_generate import generate_cls_model, generate_cls_trainer
-from utils.aggregate_block.train_settings_generate import argparser_opt_scheduler, argparser_criterion
+from utils.bd_dataset import prepro_cls_DatasetBD
+from utils.log_assist import get_dataset_path, get_git_info, get_save_path
 from utils.save_load_attack import save_attack_result
-from utils.log_assist import get_git_info
 
 
 def add_args(parser):
@@ -63,7 +79,8 @@ def add_args(parser):
     parser.add_argument('--dataset', type=str,
                         help='which dataset to use'
                         )
-    parser.add_argument('--dataset_path', type=str)
+    # not needed after rrfs flag added
+    # parser.add_argument('--dataset_path', type=str)
     parser.add_argument('--attack_target', type=int,
                         help='target class in all2one attack')
     parser.add_argument('--batch_size', type=int)
@@ -84,6 +101,7 @@ def add_args(parser):
                         help='(Optional) should be time str + given unique identification str')
     parser.add_argument('--git_hash', type=str,
                         help='git hash number, in order to find which version of code is used')
+    parser.add_argument("--rrfs", action="store_true", help="load data and save files to rrfs instead of locally")
     return parser
 
 def main():
@@ -104,17 +122,18 @@ def main():
     args.num_classes = get_num_classes(args.dataset)
     args.input_height, args.input_width, args.input_channel = get_input_shape(args.dataset)
     args.img_size = (args.input_height, args.input_width, args.input_channel)
-    args.dataset_path = f"{args.dataset_path}/{args.dataset}"
+    args.dataset_path = f"{get_dataset_path(args.rrfs)}/{args.dataset}"
 
     ### save path
+    base_save_path = get_save_path(args.rrfs)
     if 'save_folder_name' not in args:
         save_path = generate_save_folder(
             run_info=('afterwards' if 'load_path' in args.__dict__ else 'attack') + '_' + args.attack,
             given_load_file_path=args.load_path if 'load_path' in args else None,
-            all_record_folder_path='../record',
+            all_record_folder_path=base_save_path,
         )
     else:
-        save_path = '../record/' + args.save_folder_name
+        save_path = f"{base_save_path}/args.save_folder_name"
         os.mkdir(save_path)
 
     args.save_path = save_path
@@ -124,8 +143,10 @@ def main():
 
     ### set the logger
     logFormatter = logging.Formatter(
-        fmt='%(asctime)s [%(levelname)-8s] [%(filename)s:%(lineno)d] %(message)s',
-        datefmt='%Y-%m-%d:%H:%M:%S',
+        fmt='[%(filename)s:%(lineno)d] %(message)s',
+        # Kshitij did this
+        # fmt='%(asctime)s [%(levelname)-8s] [%(filename)s:%(lineno)d] %(message)s',
+        # datefmt='%Y-%m-%d:%H:%M:%S',
     )
     logger = logging.getLogger()
 

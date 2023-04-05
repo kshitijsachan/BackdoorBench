@@ -2,7 +2,7 @@ device: 'cuda'
 checkpoint_load:
 checkpoint_save:
 log:
-data_root: 'data/'
+data_root: '~/rrfs/ksachan/backdoor_bench/data'
 
 dataset: 'cifar10'
 num_classes: 

@@ -15,31 +15,47 @@ basic structure:
 7. save the attack result for defense
 '''
 
-import sys, yaml, os
+import os
+import sys
+
+import yaml
 
 os.chdir(sys.path[0])
 sys.path.append('../')
 os.getcwd()
 
 import argparse
-from pprint import  pformat
+import logging
+import time
+from copy import deepcopy
+from pprint import pformat
+
 import numpy as np
 import torch
-import time
-import logging
 
-from utils.aggregate_block.save_path_generate import generate_save_folder
-from utils.aggregate_block.dataset_and_transform_generate import get_num_classes, get_input_shape
+from utils.aggregate_block.bd_attack_generate import (
+    bd_attack_img_trans_generate,
+    bd_attack_label_trans_generate,
+)
+from utils.aggregate_block.dataset_and_transform_generate import (
+    dataset_and_transform_generate,
+    get_input_shape,
+    get_num_classes,
+)
 from utils.aggregate_block.fix_random import fix_random
-from utils.aggregate_block.dataset_and_transform_generate import dataset_and_transform_generate
-from utils.bd_dataset import prepro_cls_DatasetBD
+from utils.aggregate_block.model_trainer_generate import (
+    generate_cls_model,
+    generate_cls_trainer,
+)
+from utils.aggregate_block.save_path_generate import generate_save_folder
+from utils.aggregate_block.train_settings_generate import (
+    argparser_criterion,
+    argparser_opt_scheduler,
+)
 from utils.backdoor_generate_pindex import generate_pidx_from_label_transform
-from utils.aggregate_block.bd_attack_generate import bd_attack_img_trans_generate, bd_attack_label_trans_generate
-from copy import deepcopy
-from utils.aggregate_block.model_trainer_generate import generate_cls_model, generate_cls_trainer
-from utils.aggregate_block.train_settings_generate import argparser_opt_scheduler, argparser_criterion
+from utils.bd_dataset import prepro_cls_DatasetBD
+from utils.log_assist import SAVE_PATH, get_git_info
 from utils.save_load_attack import save_attack_result
-from utils.log_assist import get_git_info
 
 
 def add_args(parser):

@@ -45,37 +45,43 @@ basic sturcture for defense method:
 
 
 
-from ast import arg
+import argparse
 import logging
+import os
+import sys
 import time
-
+from ast import arg
 from calendar import c
 
 import torch
-import logging
-import argparse
-import sys
-import os
+
 sys.path.append('../')
 sys.path.append(os.getcwd())
 
 import pickle
 import time
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import numpy as np
-
 from sklearn.cluster import KMeans
+from utils_ac.clustering_analyzer import ClusteringAnalyzer
+
+from utils.aggregate_block.dataset_and_transform_generate import (
+    get_input_shape,
+    get_num_classes,
+    get_transform,
+)
 from utils.aggregate_block.fix_random import fix_random
 from utils.aggregate_block.model_trainer_generate import generate_cls_model
-from utils_ac.clustering_analyzer import ClusteringAnalyzer
-from utils.aggregate_block.dataset_and_transform_generate import get_input_shape, get_num_classes, get_transform
 from utils.bd_dataset import prepro_cls_DatasetBD
 from utils.nCHW_nHWC import *
 from utils.save_load_attack import load_attack_result
+
 sys.path.append(os.getcwd())
+from pprint import pformat, pprint
+
 import yaml
-from pprint import pprint, pformat
+
 
 def get_args():
     #set the basic parameter
@@ -233,7 +239,7 @@ def cluster_activations(
     separated_reduced_activations = []
 
     if clustering_method == "KMeans":
-        clusterer = KMeans(n_clusters=nb_clusters)
+        clusterer = KMeans(n_clusters=nb_clusters, n_init=10)
     else:
         raise ValueError(clustering_method + " clustering method not supported.")
 
@@ -276,7 +282,7 @@ def reduce_dimensionality(activations: np.ndarray, nb_dims: int = 10, reduce: st
     :return: Array with the reduced activations.
     """
     # pylint: disable=E0001
-    from sklearn.decomposition import FastICA, PCA
+    from sklearn.decomposition import PCA, FastICA
 
     if reduce == "FastICA":
         projector = FastICA(n_components=nb_dims, max_iter=1000, tol=0.005)
@@ -355,8 +361,10 @@ def get_activations(name,model,x_batch):
 def ac(args,result):
     ### set logger
     logFormatter = logging.Formatter(
-        fmt='%(asctime)s [%(levelname)-8s] [%(filename)s:%(lineno)d] %(message)s',
-        datefmt='%Y-%m-%d:%H:%M:%S',
+        fmt='[%(filename)s:%(lineno)d] %(message)s',
+        # Kshitij did this
+        # fmt='%(asctime)s [%(levelname)-8s] [%(filename)s:%(lineno)d] %(message)s',
+        # datefmt='%Y-%m-%d:%H:%M:%S',
     )
     logger = logging.getLogger()
     if args.log is not None and args.log != '':
@@ -568,7 +576,7 @@ def ac(args,result):
             },
             f'./{args.checkpoint_save}defense_result.pt'
             )
-        logging.info(f'Epoch{j}: clean_acc:{clean_acc} asr:{asr_acc} best_acc:{best_acc} best_asr{best_asr}')
+        logging.info(f'Epoch {j}: clean_acc:{clean_acc:.3f} asr:{asr_acc:.3f} best_acc:{best_acc:.3f} best_asr{best_asr:.3f}')
 
     model.to(args.device)
     result['model'] = model

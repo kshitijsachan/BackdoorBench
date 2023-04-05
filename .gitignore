@@ -1,2 +1,4 @@
 record
 /data/
+
+__pycache__/
