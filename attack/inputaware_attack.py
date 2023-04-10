@@ -1,4 +1,4 @@
-'''
+"""
 This file is modified based on the following source:
 
 link : https://github.com/VinAIResearch/input-aware-backdoor-attack-release
@@ -19,29 +19,38 @@ basic sturcture for main:
     4. clean train 25 epochs
     5. training with backdoor modification simultaneously
     6. save attack result
-'''
+"""
 
-import sys, yaml, os, time
+import os
+import sys
+import time
 
-os.chdir(sys.path[0])
-sys.path.append('../')
-os.getcwd()
+import yaml
 
-from pprint import pformat
-import shutil
+os.chdir(os.path.dirname(__file__))
+sys.path.append("../")
+
 import argparse
-from utils.log_assist import get_git_info
+import shutil
+from copy import deepcopy
+from pprint import pformat
+
+from torchvision.transforms import ToPILImage
+
+from utils.aggregate_block.dataset_and_transform_generate import (
+    get_dataset_denormalization,
+    get_dataset_normalization,
+    get_input_shape,
+    get_num_classes,
+)
 from utils.aggregate_block.fix_random import fix_random
-from utils.aggregate_block.dataset_and_transform_generate import get_num_classes, get_input_shape, get_dataset_normalization, get_dataset_denormalization
 from utils.aggregate_block.model_trainer_generate import generate_cls_model
 from utils.aggregate_block.save_path_generate import generate_save_folder
-from utils.save_load_attack import summary_dict
-from utils.trainer_cls import Metric_Aggregator, ModelTrainerCLS
 from utils.bd_dataset import prepro_cls_DatasetBD, xy_iter
-from utils.save_load_attack import save_attack_result, sample_pil_imgs
+from utils.log_assist import get_dataset_path, get_git_info, get_save_path
+from utils.save_load_attack import sample_pil_imgs, save_attack_result, summary_dict
+from utils.trainer_cls import Metric_Aggregator, ModelTrainerCLS
 
-from copy import deepcopy
-from torchvision.transforms import ToPILImage
 to_pil = ToPILImage()
 
 agg = Metric_Aggregator()
@@ -52,16 +61,17 @@ import os
 
 import cv2
 import numpy as np
-import torch.utils.data as data
-from PIL import Image
-from utils.aggregate_block.dataset_and_transform_generate import dataset_and_transform_generate
-
+import torch
 import torch.nn.functional as F
+import torch.utils.data as data
 import torchvision
+from PIL import Image
+from torch import nn
 from torchvision import transforms
 
-import torch
-from torch import nn
+from utils.aggregate_block.dataset_and_transform_generate import (
+    dataset_and_transform_generate,
+)
 
 
 class Conv2dBlock(nn.Module):
@@ -103,7 +113,6 @@ class UpSampleBlock(nn.Module):
         for module in self.children():
             x = module(x)
         return x
-
 
 
 class Normalize:
@@ -183,13 +192,15 @@ class Generator(nn.Sequential):
         self._denormalizer = self._get_denormalize(opt)
 
     def _get_denormalize(self, opt):
-        denormalizer = Denormalize(opt, get_dataset_normalization(opt.dataset).mean,
-                                   get_dataset_normalization(opt.dataset).std)
+        denormalizer = Denormalize(
+            opt, get_dataset_normalization(opt.dataset).mean, get_dataset_normalization(opt.dataset).std
+        )
         return denormalizer
 
     def _get_normalize(self, opt):
-        normalizer = Normalize(opt, get_dataset_normalization(opt.dataset).mean,
-                                   get_dataset_normalization(opt.dataset).std)
+        normalizer = Normalize(
+            opt, get_dataset_normalization(opt.dataset).mean, get_dataset_normalization(opt.dataset).std
+        )
         return normalizer
 
     def forward(self, x):
@@ -288,6 +299,7 @@ def progress_bar(current, total, msg=None):
         sys.stdout.write("\n")
     sys.stdout.flush()
 
+
 class ColorDepthShrinking(object):
     def __init__(self, c=3):
         self.t = 1 << int(8 - c)
@@ -334,22 +346,25 @@ def get_transform(opt, train=True, c=0, k=0):
     transforms_list.append(get_dataset_normalization(opt.dataset))
     return transforms.Compose(transforms_list)
 
+
 class Args:
     pass
 
-def get_dataloader(opt, train=True, c=0, k=0):
 
+def get_dataloader(opt, train=True, c=0, k=0):
     args = Args()
     args.dataset = opt.dataset
     args.dataset_path = opt.dataset_path
     args.img_size = (opt.input_height, opt.input_width, opt.input_channel)
 
-    train_dataset_without_transform, \
-    train_img_transform, \
-    train_label_transfrom, \
-    test_dataset_without_transform, \
-    test_img_transform, \
-    test_label_transform = dataset_and_transform_generate(args=opt)
+    (
+        train_dataset_without_transform,
+        train_img_transform,
+        train_label_transfrom,
+        test_dataset_without_transform,
+        test_img_transform,
+        test_label_transform,
+    ) = dataset_and_transform_generate(args=opt)
 
     if train:
         dataset = train_dataset_without_transform
@@ -392,7 +407,7 @@ def create_targets_bd(targets, opt):
 
 
 def create_bd(inputs, targets, netG, netM, opt, train_or_test):
-    if train_or_test == 'train':
+    if train_or_test == "train":
         bd_targets = create_targets_bd(targets, opt)
         if inputs.__len__() == 0:  # for case that no sample should be poisoned
             return inputs, bd_targets, inputs.detach().clone(), inputs.detach().clone()
@@ -402,10 +417,12 @@ def create_bd(inputs, targets, netG, netM, opt, train_or_test):
         masks_output = netM.threshold(netM(inputs))
         bd_inputs = inputs + (patterns - inputs) * masks_output
         return bd_inputs, bd_targets, patterns, masks_output
-    if train_or_test == 'test':
+    if train_or_test == "test":
         bd_targets = create_targets_bd(targets, opt)
 
-        position_changed = (bd_targets - targets != 0) # no matter all2all or all2one, we want location changed to tell whether the bd is effective
+        position_changed = (
+            bd_targets - targets != 0
+        )  # no matter all2all or all2one, we want location changed to tell whether the bd is effective
 
         inputs, bd_targets = inputs[position_changed], bd_targets[position_changed]
 
@@ -419,9 +436,8 @@ def create_bd(inputs, targets, netG, netM, opt, train_or_test):
         return bd_inputs, bd_targets, patterns, masks_output, position_changed, targets
 
 
-
 def create_cross(inputs1, inputs2, netG, netM, opt):
-    if inputs1.__len__() == 0: # for case that no sample should be poisoned
+    if inputs1.__len__() == 0:  # for case that no sample should be poisoned
         return inputs2.detach().clone(), inputs2, inputs2.detach().clone()
     patterns2 = netG(inputs2)
     patterns2 = netG.normalize_pattern(patterns2)
@@ -429,24 +445,28 @@ def create_cross(inputs1, inputs2, netG, netM, opt):
     inputs_cross = inputs1 + (patterns2 - inputs1) * masks_output
     return inputs_cross, patterns2, masks_output
 
-def generalize_to_lower_pratio(pratio, bs):
 
+def generalize_to_lower_pratio(pratio, bs):
     if pratio * bs >= 1:
         # the normal case that each batch can have at least one poison sample
         return pratio * bs
     else:
         # then randomly return number of poison sample
-        if np.random.uniform(0,1) < pratio * bs: # eg. pratio = 1/1280, then 1/10 of batch(bs=128) should contains one sample
+        if (
+            np.random.uniform(0, 1) < pratio * bs
+        ):  # eg. pratio = 1/1280, then 1/10 of batch(bs=128) should contains one sample
             return 1
         else:
             return 0
 
-logging.warning('In train, if ratio of bd/cross/clean being zero, plz checkout the TOTAL number of bd/cross/clean !!!\n\
-We set the ratio being 0 if TOTAL number of bd/cross/clean is 0 (otherwise 0/0 happens)')
 
-def train_step(
-    netC, netG, netM, optimizerC, optimizerG, schedulerC, schedulerG, train_dl1, train_dl2, epoch, opt
-):
+logging.warning(
+    "In train, if ratio of bd/cross/clean being zero, plz checkout the TOTAL number of bd/cross/clean !!!\n\
+We set the ratio being 0 if TOTAL number of bd/cross/clean is 0 (otherwise 0/0 happens)"
+)
+
+
+def train_step(netC, netG, netM, optimizerC, optimizerG, schedulerC, schedulerG, train_dl1, train_dl2, epoch, opt):
     netC.train()
     netG.train()
     logging.info(" Training:")
@@ -469,10 +489,12 @@ def train_step(
         inputs2, targets2 = inputs2.to(opt.device), targets2.to(opt.device)
 
         bs = inputs1.shape[0]
-        num_bd = int(generalize_to_lower_pratio(opt.pratio, bs)) #int(opt.pratio * bs)
+        num_bd = int(generalize_to_lower_pratio(opt.pratio, bs))  # int(opt.pratio * bs)
         num_cross = num_bd
 
-        inputs_bd, targets_bd, patterns1, masks1 = create_bd(inputs1[:num_bd], targets1[:num_bd], netG, netM, opt, 'train')
+        inputs_bd, targets_bd, patterns1, masks1 = create_bd(
+            inputs1[:num_bd], targets1[:num_bd], netG, netM, opt, "train"
+        )
         inputs_cross, patterns2, masks2 = create_cross(
             inputs1[num_bd : num_bd + num_cross], inputs2[num_bd : num_bd + num_cross], netG, netM, opt
         )
@@ -508,16 +530,23 @@ def train_step(
         total_correct_clean += torch.sum(
             torch.argmax(preds[num_bd + num_cross :], dim=1) == total_targets[num_bd + num_cross :]
         )
-        total_cross_correct += (torch.sum(
-            torch.argmax(preds[num_bd : num_bd + num_cross], dim=1) == total_targets[num_bd : num_bd + num_cross]
-        )) if num_cross > 0 else 0
+        total_cross_correct += (
+            (
+                torch.sum(
+                    torch.argmax(preds[num_bd : num_bd + num_cross], dim=1)
+                    == total_targets[num_bd : num_bd + num_cross]
+                )
+            )
+            if num_cross > 0
+            else 0
+        )
         total_bd_correct += (torch.sum(torch.argmax(preds[:num_bd], dim=1) == targets_bd)) if num_bd > 0 else 0
         total_loss += loss_ce.detach() * bs
         avg_loss = total_loss / total
 
-        acc_clean = total_correct_clean  / total_clean
-        acc_bd = (total_bd_correct  / total_bd) if total_bd > 0 else 0
-        acc_cross = (total_cross_correct  / total_cross) if total_cross > 0 else 0
+        acc_clean = total_correct_clean / total_clean
+        acc_bd = (total_bd_correct / total_bd) if total_bd > 0 else 0
+        acc_cross = (total_cross_correct / total_cross) if total_cross > 0 else 0
         infor_string = "CE loss: {:.4f} - Accuracy: {:.3f} | BD Accuracy: {:.3f} | Cross Accuracy: {:3f}".format(
             avg_loss, acc_clean, acc_bd, acc_cross
         )
@@ -540,14 +569,16 @@ def train_step(
         schedulerC.step()
     schedulerG.step()
 
-    #agg
+    # agg
     # logging.info(f'End train epoch {epoch} : acc_clean : {acc_clean}, acc_bd : {acc_bd}, acc_cross : {acc_cross} ')
-    agg({
-        'train_epoch_num':float(epoch),
-        'train_acc_clean':float(acc_clean),
-        'train_acc_bd':float(acc_bd),
-        'train_acc_cross':float(acc_cross),
-    })
+    agg(
+        {
+            "train_epoch_num": float(epoch),
+            "train_acc_clean": float(acc_clean),
+            "train_acc_bd": float(acc_bd),
+            "train_acc_cross": float(acc_cross),
+        }
+    )
 
     return
 
@@ -569,17 +600,16 @@ def eval(
     netG.eval()
     logging.info(" Eval:")
 
-
     # set shuffle here = False, since other place need randomness to generate cross sample.
-    test_dl1 = torch.utils.data.DataLoader(test_dl1.dataset, batch_size=opt.batchsize,
-                                                      num_workers=opt.num_workers,
-                                                      shuffle=False)
+    test_dl1 = torch.utils.data.DataLoader(
+        test_dl1.dataset, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=False
+    )
 
     transforms_reversible = transforms.Compose(
         list(
             filter(
                 lambda x: isinstance(x, (transforms.Normalize, transforms.Resize, transforms.ToTensor)),
-                deepcopy(test_dl1.dataset.ori_image_transform_in_loading.transforms)
+                deepcopy(test_dl1.dataset.ori_image_transform_in_loading.transforms),
             )
         )
     )
@@ -593,68 +623,67 @@ def eval(
     # So we set the reversible_test_dl2 with shuffle = True
     reversible_test_ds1 = deepcopy(test_dl1.dataset)
     reversible_test_ds1.ori_image_transform_in_loading = transforms_reversible
-    reversible_test_dl1 = torch.utils.data.DataLoader(reversible_test_ds1, batch_size=opt.batchsize, num_workers=opt.num_workers,
-                                                     shuffle=False)
+    reversible_test_dl1 = torch.utils.data.DataLoader(
+        reversible_test_ds1, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=False
+    )
 
     reversible_test_ds2 = deepcopy(test_dl1.dataset)
     reversible_test_ds2.ori_image_transform_in_loading = transforms_reversible
-    reversible_test_dl2 = torch.utils.data.DataLoader(reversible_test_ds2, batch_size=opt.batchsize,
-                                                      num_workers=opt.num_workers,
-                                                      shuffle=True)
+    reversible_test_dl2 = torch.utils.data.DataLoader(
+        reversible_test_ds2, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=True
+    )
 
     x_poison, y_poison = [], []
     x_cross, y_cross = [], []
 
-    for batch_idx, (inputs1, targets1), (inputs2, targets2) in zip(range(len(reversible_test_dl1)), reversible_test_dl1, reversible_test_dl2):
+    for batch_idx, (inputs1, targets1), (inputs2, targets2) in zip(
+        range(len(reversible_test_dl1)), reversible_test_dl1, reversible_test_dl2
+    ):
         with torch.no_grad():
             inputs1, targets1 = inputs1.to(opt.device), targets1.to(opt.device)
             inputs2, targets2 = inputs2.to(opt.device), targets2.to(opt.device)
             bs = inputs1.shape[0]
 
-            inputs_bd, targets_bd, _, _,  position_changed, targets = create_bd(inputs1, targets1, netG, netM, opt, 'test')
+            inputs_bd, targets_bd, _, _, position_changed, targets = create_bd(
+                inputs1, targets1, netG, netM, opt, "test"
+            )
 
             inputs_cross, _, _ = create_cross(inputs1, inputs2, netG, netM, opt)
 
-            x_poison += ([to_pil(denormalizer(t_img)) for (t_img) in inputs_bd.detach().clone().cpu()])
+            x_poison += [to_pil(denormalizer(t_img)) for (t_img) in inputs_bd.detach().clone().cpu()]
             y_poison += targets_bd.detach().clone().cpu().tolist()
 
-            x_cross += ([to_pil(denormalizer(t_img)) for t_img in inputs_cross.detach().clone().cpu()])
-            y_cross += (targets.detach().clone().cpu().tolist())
+            x_cross += [to_pil(denormalizer(t_img)) for t_img in inputs_cross.detach().clone().cpu()]
+            y_cross += targets.detach().clone().cpu().tolist()
 
     poison_test_ds = xy_iter(x_poison, y_poison, deepcopy(test_dl1.dataset.ori_image_transform_in_loading))
-    poison_test_dl = torch.utils.data.DataLoader(poison_test_ds, batch_size=opt.batchsize, num_workers=opt.num_workers,
-                                                 shuffle=False)
+    poison_test_dl = torch.utils.data.DataLoader(
+        poison_test_ds, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=False
+    )
 
     cross_test_ds = xy_iter(x_cross, y_cross, deepcopy(test_dl1.dataset.ori_image_transform_in_loading))
-    cross_test_dl = torch.utils.data.DataLoader(cross_test_ds, batch_size=opt.batchsize, num_workers=opt.num_workers,
-                                                shuffle=False)
+    cross_test_dl = torch.utils.data.DataLoader(
+        cross_test_ds, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=False
+    )
 
     trainer = ModelTrainerCLS(netC)
     trainer.criterion = torch.nn.CrossEntropyLoss()
 
-    if epoch == 1 or epoch % ((opt.epochs//10) + 1) == (opt.epochs//10):
+    if epoch == 1 or epoch % ((opt.epochs // 10) + 1) == (opt.epochs // 10):
         sample_pil_imgs(test_dl1.dataset.data, f"{opt.save_path}/test_dl_{epoch}_samples")
         sample_pil_imgs(poison_test_dl.dataset.data, f"{opt.save_path}/poison_test_dl_{epoch}_samples")
         sample_pil_imgs(cross_test_dl.dataset.data, f"{opt.save_path}/cross_test_dl_{epoch}_samples")
 
-    clean_test_metric = trainer.test(
-        test_dl1, device=opt.device
-    )
-    avg_acc_clean = clean_test_metric['test_correct'] / clean_test_metric['test_total']
+    clean_test_metric = trainer.test(test_dl1, device=opt.device)
+    avg_acc_clean = clean_test_metric["test_correct"] / clean_test_metric["test_total"]
 
-    poison_test_metric = trainer.test(
-        poison_test_dl, device=opt.device
-    )
-    avg_acc_bd = poison_test_metric['test_correct'] / poison_test_metric['test_total']
+    poison_test_metric = trainer.test(poison_test_dl, device=opt.device)
+    avg_acc_bd = poison_test_metric["test_correct"] / poison_test_metric["test_total"]
 
-    cross_test_metric = trainer.test(
-        cross_test_dl, device=opt.device
-    )
-    avg_acc_cross = cross_test_metric['test_correct'] / cross_test_metric['test_total']
+    cross_test_metric = trainer.test(cross_test_dl, device=opt.device)
+    avg_acc_cross = cross_test_metric["test_correct"] / cross_test_metric["test_total"]
 
-    logging.info(
-            f"epoch:{epoch}, acc_clean:{avg_acc_clean},  acc_bd:{avg_acc_bd},  acc_cross:{avg_acc_cross}"
-        )
+    logging.info(f"epoch:{epoch}, acc_clean:{avg_acc_clean},  acc_bd:{avg_acc_bd},  acc_cross:{avg_acc_cross}")
 
     logging.info(" Saving!!")
 
@@ -678,7 +707,7 @@ def eval(
         os.makedirs(ckpt_folder)
     ckpt_path = os.path.join(ckpt_folder, "{}_{}_ckpt.pth.tar".format(opt.attack_mode, opt.dataset))
     torch.save(state_dict, ckpt_path)
-    return avg_acc_clean,avg_acc_bd,avg_acc_cross, epoch
+    return avg_acc_clean, avg_acc_bd, avg_acc_cross, epoch
 
 
 # -------------------------------------------------------------------------------------
@@ -726,8 +755,6 @@ def train_mask_step(netM, optimizerM, schedulerM, train_dl1, train_dl2, epoch, o
                 os.makedirs(dir_temps)
             path_masks = os.path.join(dir_temps, "{}_{}_masks.png".format(opt.dataset, opt.attack_mode))
             torchvision.utils.save_image(masks1, path_masks, pad_value=1)
-
-
 
     schedulerM.step()
 
@@ -782,15 +809,19 @@ def eval_mask(netM, optimizerM, schedulerM, test_dl1, test_dl2, epoch, opt):
 
 def train(opt):
     ### 3. set the device, model, criterion, optimizer, training schedule.
-    logging.info('use generate_cls_model() ')
-    netC = generate_cls_model(opt.model, opt.num_classes,image_size=opt.img_size[0],)
-    if torch.cuda.device_count() > 1 and opt.device == 'cuda':
+    logging.info("use generate_cls_model() ")
+    netC = generate_cls_model(
+        opt.model,
+        opt.num_classes,
+        image_size=opt.img_size[0],
+    )
+    if torch.cuda.device_count() > 1 and opt.device == "cuda":
         logging.info("device='cuda', default use all device")
         netC = torch.nn.DataParallel(netC)
     netC.to(opt.device)
-    logging.warning(f'actually model use = {opt.model}')
+    logging.warning(f"actually model use = {opt.model}")
     netG = Generator(opt)
-    if torch.cuda.device_count() > 1 and opt.device == 'cuda':
+    if torch.cuda.device_count() > 1 and opt.device == "cuda":
         logging.info("device='cuda', default use all device")
         netG = torch.nn.DataParallel(netG)
     netG.to(opt.device)
@@ -805,7 +836,7 @@ def train(opt):
     schedulerG = torch.optim.lr_scheduler.MultiStepLR(optimizerG, opt.schedulerG_milestones, opt.schedulerG_lambda)
 
     netM = Generator(opt, out_channels=1).to(opt.device)
-    if torch.cuda.device_count() > 1 and opt.device == 'cuda':
+    if torch.cuda.device_count() > 1 and opt.device == "cuda":
         logging.info("device='cuda', default use all device")
         netM = torch.nn.DataParallel(netM)
     optimizerM = torch.optim.Adam(netM.parameters(), opt.lr_M, betas=(0.5, 0.9))
@@ -851,11 +882,11 @@ def train(opt):
     test_dl1 = get_dataloader(opt, train=False)
     test_dl2 = get_dataloader(opt, train=False)
 
-    logging.info(pformat(opt.__dict__)) #set here since the opt change at beginning of this function
+    logging.info(pformat(opt.__dict__))  # set here since the opt change at beginning of this function
     try:
         logging.info(pformat(get_git_info()))
     except:
-        logging.info('Getting git info fails.')
+        logging.info("Getting git info fails.")
     ### 4. clean train 25 epochs
     if epoch == 1:
         netM.train()
@@ -893,7 +924,7 @@ def train(opt):
             opt,
         )
 
-        test_avg_acc_clean, test_avg_acc_bd, test_avg_acc_cross, epoch=eval(
+        test_avg_acc_clean, test_avg_acc_bd, test_avg_acc_cross, epoch = eval(
             netC,
             netG,
             netM,
@@ -906,12 +937,14 @@ def train(opt):
             epoch,
             opt,
         )
-        agg({
-            "test_avg_acc_clean":float(test_avg_acc_clean),
-            "test_avg_acc_bd":float(test_avg_acc_bd),
-            "test_avg_acc_cross":float(test_avg_acc_cross),
-            "test_epoch_num":float(epoch),
-        })
+        agg(
+            {
+                "test_avg_acc_clean": float(test_avg_acc_clean),
+                "test_avg_acc_bd": float(test_avg_acc_bd),
+                "test_avg_acc_cross": float(test_avg_acc_cross),
+                "test_epoch_num": float(epoch),
+            }
+        )
 
         epoch += 1
         if epoch > opt.epochs:
@@ -919,20 +952,33 @@ def train(opt):
 
     ###6. save attack result
 
-    train_dl1.dataset.ori_image_transform_in_loading = transforms.Compose(list(filter(lambda x: isinstance(x, (transforms.Normalize, transforms.Resize, transforms.ToTensor)),
-                                         train_dl1.dataset.ori_image_transform_in_loading.transforms)))
-    train_dl2.dataset.ori_image_transform_in_loading = transforms.Compose(list(filter(lambda x: isinstance(x, (transforms.Normalize, transforms.Resize, transforms.ToTensor)),
-                                         train_dl2.dataset.ori_image_transform_in_loading.transforms)))
+    train_dl1.dataset.ori_image_transform_in_loading = transforms.Compose(
+        list(
+            filter(
+                lambda x: isinstance(x, (transforms.Normalize, transforms.Resize, transforms.ToTensor)),
+                train_dl1.dataset.ori_image_transform_in_loading.transforms,
+            )
+        )
+    )
+    train_dl2.dataset.ori_image_transform_in_loading = transforms.Compose(
+        list(
+            filter(
+                lambda x: isinstance(x, (transforms.Normalize, transforms.Resize, transforms.ToTensor)),
+                train_dl2.dataset.ori_image_transform_in_loading.transforms,
+            )
+        )
+    )
     for trans_t in train_dl1.dataset.ori_image_transform_in_loading.transforms:
         if isinstance(trans_t, transforms.Normalize):
             denormalizer = get_dataset_denormalization(trans_t)
             logging.info(f"{denormalizer}")
 
-
     train_dl1 = torch.utils.data.DataLoader(
-        train_dl1.dataset, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=False)
+        train_dl1.dataset, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=False
+    )
     train_dl2 = torch.utils.data.DataLoader(
-        train_dl2.dataset, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=True) # true since only the first one decide the order.
+        train_dl2.dataset, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=True
+    )  # true since only the first one decide the order.
     one_hot_original_index = []
     original_targets = []
     bd_input = []
@@ -944,17 +990,18 @@ def train(opt):
     netM.eval()
     netM.to(opt.device)
     for batch_idx, (inputs1, targets1), (inputs2, targets2) in zip(range(len(train_dl1)), train_dl1, train_dl2):
-
         optimizerC.zero_grad()
 
         inputs1, targets1 = inputs1.to(opt.device), targets1.to(opt.device)
         inputs2, targets2 = inputs2.to(opt.device), targets2.to(opt.device)
 
         bs = inputs1.shape[0]
-        num_bd = int(generalize_to_lower_pratio(opt.pratio, bs)) #int(opt.pratio * bs)
+        num_bd = int(generalize_to_lower_pratio(opt.pratio, bs))  # int(opt.pratio * bs)
         num_cross = num_bd
 
-        inputs_bd, targets_bd, patterns1, masks1 = create_bd(inputs1[:num_bd], targets1[:num_bd], netG, netM, opt, 'train')
+        inputs_bd, targets_bd, patterns1, masks1 = create_bd(
+            inputs1[:num_bd], targets1[:num_bd], netG, netM, opt, "train"
+        )
         inputs_cross, patterns2, masks2 = create_cross(
             inputs1[num_bd : num_bd + num_cross], inputs2[num_bd : num_bd + num_cross], netG, netM, opt
         )
@@ -964,20 +1011,19 @@ def train(opt):
             inputs_cross = torch.cat([denormalizer(img)[None, ...] for img in inputs_cross])
 
         inputs_bd_cpu, inputs_cross_cpu = inputs_bd.detach().clone().cpu(), inputs_cross.detach().clone().cpu()
-        targets_bd_cpu, targets1_cpu =  targets_bd.detach().clone().cpu(), targets1.detach().clone().cpu()
+        targets_bd_cpu, targets1_cpu = targets_bd.detach().clone().cpu(), targets1.detach().clone().cpu()
 
         one_hot = np.zeros(bs)
-        one_hot[:(num_bd + num_cross)] = 1
+        one_hot[: (num_bd + num_cross)] = 1
         one_hot_original_index.append(one_hot)
         original_targets += ((targets1.detach().clone().cpu())[: (num_bd + num_cross)]).tolist()
         bd_input.append(torch.cat([inputs_bd_cpu, inputs_cross_cpu], dim=0))
-        bd_targets.append(torch.cat([targets_bd_cpu, targets1_cpu[num_bd: (num_bd + num_cross)]], dim=0))
+        bd_targets.append(torch.cat([targets_bd_cpu, targets1_cpu[num_bd : (num_bd + num_cross)]], dim=0))
 
     bd_train_x = [to_pil(t_img) for t_img in torch.cat(bd_input, dim=0).float().cpu()]
     bd_train_y = torch.cat(bd_targets, dim=0).long().cpu().numpy()
     train_poison_indicator = np.concatenate(one_hot_original_index)
-    bd_train_original_index = np.where(train_poison_indicator == 1)[
-        0] if train_poison_indicator is not None else None
+    bd_train_original_index = np.where(train_poison_indicator == 1)[0] if train_poison_indicator is not None else None
 
     bd_train_for_save = prepro_cls_DatasetBD(
         full_dataset_without_transform=list(zip(bd_train_x, bd_train_y)),
@@ -1002,19 +1048,33 @@ def train(opt):
         bd_train_for_save.targets,
     )
 
-    test_dl1.dataset.ori_image_transform_in_loading = transforms.Compose(list(filter(lambda x: isinstance(x, (transforms.Normalize, transforms.Resize, transforms.ToTensor)),
-                                         test_dl1.dataset.ori_image_transform_in_loading.transforms)))
-    test_dl2.dataset.ori_image_transform_in_loading = transforms.Compose(list(filter(lambda x: isinstance(x, (transforms.Normalize, transforms.Resize, transforms.ToTensor)),
-                                         test_dl2.dataset.ori_image_transform_in_loading.transforms)))
+    test_dl1.dataset.ori_image_transform_in_loading = transforms.Compose(
+        list(
+            filter(
+                lambda x: isinstance(x, (transforms.Normalize, transforms.Resize, transforms.ToTensor)),
+                test_dl1.dataset.ori_image_transform_in_loading.transforms,
+            )
+        )
+    )
+    test_dl2.dataset.ori_image_transform_in_loading = transforms.Compose(
+        list(
+            filter(
+                lambda x: isinstance(x, (transforms.Normalize, transforms.Resize, transforms.ToTensor)),
+                test_dl2.dataset.ori_image_transform_in_loading.transforms,
+            )
+        )
+    )
     for trans_t in test_dl1.dataset.ori_image_transform_in_loading.transforms:
         if isinstance(trans_t, transforms.Normalize):
             denormalizer = get_dataset_denormalization(trans_t)
             logging.info(f"{denormalizer}")
 
     test_dl1 = torch.utils.data.DataLoader(
-        test_dl1.dataset, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=False)
+        test_dl1.dataset, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=False
+    )
     test_dl2 = torch.utils.data.DataLoader(
-        test_dl2.dataset, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=True)
+        test_dl2.dataset, batch_size=opt.batchsize, num_workers=opt.num_workers, shuffle=True
+    )
 
     test_bd_input = []
     test_bd_targets = []
@@ -1032,8 +1092,10 @@ def train(opt):
             inputs2, targets2 = inputs2.to(opt.device), targets2.to(opt.device)
             bs = inputs1.shape[0]
 
-            inputs_bd, targets_bd, _, _,  position_changed, targets = create_bd(inputs1, targets1, netG, netM, opt, 'test')
-            inputs_bd = torch.cat([denormalizer(img)[None, ...]  for img in inputs_bd])
+            inputs_bd, targets_bd, _, _, position_changed, targets = create_bd(
+                inputs1, targets1, netG, netM, opt, "test"
+            )
+            inputs_bd = torch.cat([denormalizer(img)[None, ...] for img in inputs_bd])
 
             # inputs_cross, _, _ = create_cross(inputs1, inputs2, netG, netM, opt)
 
@@ -1085,7 +1147,7 @@ def train(opt):
         clean_data=opt.dataset,
         bd_train=bd_train_for_save,
         bd_test=bd_test_for_save,
-        save_path=f'{opt.save_path}',
+        save_path=f"{opt.save_path}",
     )
 
     # final_save_dict = {
@@ -1119,64 +1181,147 @@ def train(opt):
     #     f'{opt.save_path}/attack_result.pt',
     # )
 
+
 def get_arguments():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--yaml_path', type=str, default='../config/attack/inputaware/default.yaml',
-                        help='path for yaml file provide additional default attributes')
-    parser.add_argument('--model', type=str, help='Only use when model is not given in original code !!!')
-    parser.add_argument('--save_folder_name', type=str,
-                        help='(Optional) should be time str + given unique identification str')
+    parser.add_argument(
+        "--yaml_path",
+        type=str,
+        default="../config/attack/inputaware/default.yaml",
+        help="path for yaml file provide additional default attributes",
+    )
+    parser.add_argument("--model", type=str, help="Only use when model is not given in original code !!!")
+    parser.add_argument(
+        "--save_folder_name", type=str, help="(Optional) should be time str + given unique identification str"
+    )
     parser.add_argument("--continue_training", action="store_true")
 
-    parser.add_argument("--dataset_path", type=str, )#default="data/")
-    parser.add_argument("--checkpoints", type=str, )#default="./record/inputAwareAttack/checkpoints/")
-    parser.add_argument("--temps", type=str, )#default="./record/inputAwareAttack/temps")
-    parser.add_argument("--save_path", type=str, )#default="./record/inputAwareAttack/")
-    parser.add_argument("--device", type=str, )#default="cuda")
+    # parser.add_argument("--dataset_path", type=str, )#default="data/")
+    parser.add_argument(
+        "--checkpoints",
+        type=str,
+    )  # default="./record/inputAwareAttack/checkpoints/")
+    parser.add_argument(
+        "--temps",
+        type=str,
+    )  # default="./record/inputAwareAttack/temps")
+    # parser.add_argument("--save_path", type=str, )#default="./record/inputAwareAttack/")
+    parser.add_argument(
+        "--device",
+        type=str,
+    )  # default="cuda")
 
-    parser.add_argument("--dataset", type=str, )#default="cifar10")
+    parser.add_argument(
+        "--dataset",
+        type=str,
+    )  # default="cifar10")
 
+    parser.add_argument(
+        "--batchsize",
+        type=int,
+    )  # default=128)
+    parser.add_argument(
+        "--lr_G",
+        type=float,
+    )  # default=1e-2)
+    parser.add_argument(
+        "--lr_C",
+        type=float,
+    )  # default=1e-2)
+    parser.add_argument(
+        "--lr_M",
+        type=float,
+    )  # default=1e-2)
 
-    parser.add_argument("--batchsize", type=int, )#default=128)
-    parser.add_argument("--lr_G", type=float, )#default=1e-2)
-    parser.add_argument("--lr_C", type=float, )#default=1e-2)
-    parser.add_argument("--lr_M", type=float, )#default=1e-2)
+    parser.add_argument("--C_lr_scheduler", type=str)
 
-    parser.add_argument('--C_lr_scheduler', type = str)
+    parser.add_argument(
+        "--schedulerG_milestones",
+        type=list,
+    )  # default=[200, 300, 400, 500])
+    parser.add_argument(
+        "--schedulerC_milestones",
+        type=list,
+    )  # default=[100, 200, 300, 400])
+    parser.add_argument(
+        "--schedulerM_milestones",
+        type=list,
+    )  # default=[10, 20])
+    parser.add_argument(
+        "--schedulerG_lambda",
+        type=float,
+    )  # default=0.1)
+    parser.add_argument(
+        "--schedulerC_lambda",
+        type=float,
+    )  # default=0.1)
+    parser.add_argument(
+        "--schedulerM_lambda",
+        type=float,
+    )  # default=0.1)
+    parser.add_argument(
+        "--epochs",
+        type=int,
+    )  # default=100)
+    parser.add_argument(
+        "--lambda_div",
+        type=float,
+    )  # default=1)
+    parser.add_argument(
+        "--lambda_norm",
+        type=float,
+    )  # default=100)
+    parser.add_argument(
+        "--num_workers",
+        type=float,
+    )  # default=4)
 
-    parser.add_argument("--schedulerG_milestones", type=list, )#default=[200, 300, 400, 500])
-    parser.add_argument("--schedulerC_milestones", type=list, )#default=[100, 200, 300, 400])
-    parser.add_argument("--schedulerM_milestones", type=list, )#default=[10, 20])
-    parser.add_argument("--schedulerG_lambda", type=float, )#default=0.1)
-    parser.add_argument("--schedulerC_lambda", type=float, )#default=0.1)
-    parser.add_argument("--schedulerM_lambda", type=float, )#default=0.1)
-    parser.add_argument("--epochs", type=int, )#default=100)
-    parser.add_argument("--lambda_div", type=float, )#default=1)
-    parser.add_argument("--lambda_norm", type=float, )#default=100)
-    parser.add_argument("--num_workers", type=float, )#default=4)
-
-    parser.add_argument("--target_label", type=int, )#default=0)
-    parser.add_argument("--attack_mode", type=str, )#default="all2one", help="all2one or all2all")
-    parser.add_argument("--pratio", type=float, )#default=0.1)
+    parser.add_argument(
+        "--target_label",
+        type=int,
+    )  # default=0)
+    parser.add_argument(
+        "--attack_mode",
+        type=str,
+    )  # default="all2one", help="all2one or all2all")
+    parser.add_argument(
+        "--pratio",
+        type=float,
+    )  # default=0.1)
     # parser.add_argument("--p_cross", type=float, )#default=0.1)
-    parser.add_argument("--mask_density", type=float, )#default=0.032)
-    parser.add_argument("--EPSILON", type=float, )#default=1e-7)
-    parser.add_argument('--clean_train_epochs',type =int)
+    parser.add_argument(
+        "--mask_density",
+        type=float,
+    )  # default=0.032)
+    parser.add_argument(
+        "--EPSILON",
+        type=float,
+    )  # default=1e-7)
+    parser.add_argument("--clean_train_epochs", type=int)
 
-    parser.add_argument("--random_rotation", type=int, )#default=10)
-    parser.add_argument("--random_crop", type=int, )#default=5)
-    parser.add_argument("--random_seed", type=int, )#default=0)
+    parser.add_argument(
+        "--random_rotation",
+        type=int,
+    )  # default=10)
+    parser.add_argument(
+        "--random_crop",
+        type=int,
+    )  # default=5)
+    parser.add_argument(
+        "--random_seed",
+        type=int,
+    )  # default=0)
 
+    parser.add_argument("--rrfs", action="store_true", help="load data and save files to rrfs instead of locally")
     return parser
-
 
 
 def main():
     ### 1. config args, save_path, fix random seed
     opt = get_arguments().parse_args()
 
-    with open(opt.yaml_path, 'r') as f:
+    with open(opt.yaml_path, "r") as f:
         defaults = yaml.safe_load(f)
     defaults.update({k: v for k, v in opt.__dict__.items() if v is not None})
     opt.__dict__ = defaults
@@ -1188,28 +1333,29 @@ def main():
     opt.num_classes = get_num_classes(opt.dataset)
     opt.input_height, opt.input_width, opt.input_channel = get_input_shape(opt.dataset)
     opt.img_size = (opt.input_height, opt.input_width, opt.input_channel)
-    opt.dataset_path = f"{opt.dataset_path}/{opt.dataset}"
+    opt.dataset_path = f"{get_dataset_path(opt.rrfs)}/{opt.dataset}"
 
-    if 'save_folder_name' not in opt:
+    base_save_path = get_save_path(opt.rrfs)
+    if "save_folder_name" not in opt:
         save_path = generate_save_folder(
-            run_info='inputaware',
+            run_info="inputaware",
             given_load_file_path=None,
-            all_record_folder_path='../record',
+            all_record_folder_path=base_save_path,
         )
     else:
-        save_path = '../record/' + opt.save_folder_name
+        save_path = f"{base_save_path}/{opt.save_folder_name}"
         os.mkdir(save_path)
 
     opt.save_path = save_path
 
     logFormatter = logging.Formatter(
-        fmt='%(asctime)s [%(levelname)-8s] [%(filename)s:%(lineno)d] %(message)s',
-        datefmt='%Y-%m-%d:%H:%M:%S',
+        fmt="%(asctime)s [%(levelname)-8s] [%(filename)s:%(lineno)d] %(message)s",
+        datefmt="%Y-%m-%d:%H:%M:%S",
     )
     logger = logging.getLogger()
     # logFormatter = logging.Formatter("%(asctime)s [%(levelname)-5.5s] %(message)s")
 
-    fileHandler = logging.FileHandler(save_path + '/' + time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime()) + '.log')
+    fileHandler = logging.FileHandler(save_path + "/" + time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime()) + ".log")
     fileHandler.setFormatter(logFormatter)
     logger.addHandler(fileHandler)
 
@@ -1219,12 +1365,11 @@ def main():
 
     logger.setLevel(logging.INFO)
 
-
     fix_random(int(opt.random_seed))
 
     train(opt)
 
-    torch.save(opt.__dict__, save_path + '/info.pickle')
+    torch.save(opt.__dict__, save_path + "/info.pickle")
 
     agg.to_dataframe().to_csv(f"{save_path}/attack_df.csv")
     agg.summary().to_csv(f"{save_path}/attack_df_summary.csv")
@@ -1233,7 +1378,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-'''
+"""
 original license:
 
 MIT License
@@ -1257,4 +1402,4 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-'''
+"""
